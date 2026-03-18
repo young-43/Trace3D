@@ -36,7 +36,7 @@ class MaskRepairPipeline:
             self.dataset='replica'
         else:
             raise ValueError(
-                f"Unsupported dataset path '{self.dataset_path}'. "
+                f"Unsupported dataset path '{dataset_path}'. "
                 "Expected a path containing 'replica' or 'llff'."
             )
         
