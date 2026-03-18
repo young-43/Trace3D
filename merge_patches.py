@@ -112,11 +112,6 @@ class MaskRepairPipeline:
                 sam_data = np.load(f"{self.dataset_path}/{DEFAULT_SAM_FOLDER}/{ORIGIN_FOLDER}/{self.sam_name(camera.image_name)}")
             elif self.dataset=='llff':
                 sam_data = np.load(sam_paths[self.train_idx[idx]])
-            else:
-                raise ValueError(
-                    f"Unsupported dataset path '{self.dataset_path}'. "
-                    "Expected a path containing 'replica' or 'llff'."
-                )
             sam_tensor = torch.from_numpy(sam_data).cuda().squeeze()
             sam_tensor = sam_tensor[sam_tensor.sum((-2, -1)) > 96].squeeze()
             mask = SegmentationMask(sam_tensor, view=idx, image_name= camera.image_name)
