@@ -117,6 +117,106 @@ Novel View 2D Instance Segmentation
 bash replica.sh eval         
 ```
 
+## Output paths and what each command produces
+
+> `script/replica.sh` starts with `cd ..`, so please run it from the `script/` directory.
+> Path variables used below:
+> - `source=./data/${dataset}/${scene}`
+> - `output=./output/${dataset}/${scene}`
+
+1. **SAM mask generation**
+   ```bash
+   python get_sam_masks.py --sam_checkpoint {SAM_CKPT_PATH} --file_path {IMAGE_FOLDER}
+   ```
+   - Output path: `$(dirname {IMAGE_FOLDER})/sam/origin/`
+   - Files:
+     - `{image_name}.npy`: raw SAM masks per image
+     - `{image_name}_sam.png`: colorized mask preview
+
+2. **Scene reconstruction**
+   ```bash
+   bash replica.sh train_rgb
+   ```
+   - Output path: `output/`
+   - Files/folders:
+     - `cfg_args`: merged run config
+     - `cameras.json`, `input.ply`: scene metadata/init point cloud copy
+     - `point_cloud/iteration_7000/point_cloud.ply`, `point_cloud/iteration_30000/point_cloud.ply`: saved Gaussian models
+     - `chkpnt30000.pth`: RGB training checkpoint
+     - `events.out.tfevents.*` (if TensorBoard available): training logs
+
+3. **Merge patch masks**
+   ```bash
+   bash replica.sh merge_patches
+   ```
+   - Output path: `source/sam/`
+   - Files/folders:
+     - `split/{image_name}.npy`: repaired/merged mask used by later stages
+     - `compare/iter=0/*.png`: before/after mask comparison visualization
+   - Note: `merge_patches.py` currently runs one repair iteration, so compare outputs are written to `iter=0`.
+
+4. **Delete ambiguous Gaussians**
+   ```bash
+   bash replica.sh remove_ab_gaus
+   ```
+   - Output path: `output/`
+   - Files/folders:
+     - `split_result.txt`: split/prune statistics and eval logs
+     - `point_cloud/iteration_split_9000/point_cloud.ply`: pruned/split Gaussian model
+     - `chkpntsplit.pth`: checkpoint used by contrastive stage
+
+5. **Contrastive lifting**
+   ```bash
+   bash replica.sh train_contra
+   ```
+   - Output path: `output/split/chkpnt/`
+   - Files:
+     - `sp_20000.pth`: feature checkpoint for 2D/3D instance evaluation
+
+6. **Novel-view 2D instance segmentation eval**
+   ```bash
+   bash replica.sh eval
+   ```
+   - Output path: `./output/test/split/{scene}/`
+   - Files/folders:
+     - `ref/*.png`: reference-view overlays
+     - `rgb/{object_id}/*.png`: multi-view prediction overlays
+     - `overview/*.png`: sparse summary visualization
+     - `results_{timestamp}.txt`: per-object IoU and scene mIoU summary
+
+7. **3D object extraction eval**
+   ```bash
+   bash replica.sh eval_3d
+   ```
+   - Output path: `./output/test_3d/split/{scene}/`
+   - Files/folders:
+     - `objects/{object_id}/*.png`: rendered isolated object
+     - `background/{object_id}/*.png`: rendered remaining background
+     - `mask/{object_id}/*.png`: 2D mask overlay samples
+   - Extra summary file:
+     - `./eval_3d.txt`: appended scene-level metrics (mIoU/mAcc/PSNR)
+
+## How to visualize your own rendered results
+
+1. Set your dataset/scene in `script/replica.sh`.
+2. Run the full pipeline:
+   ```bash
+   cd script
+   bash replica.sh train_rgb
+   bash replica.sh merge_patches
+   bash replica.sh remove_ab_gaus
+   bash replica.sh train_contra
+   bash replica.sh eval
+   bash replica.sh eval_3d
+   ```
+3. Open generated PNGs directly:
+   - 2D segmentation overlays: `./output/test/split/{scene}/`
+   - 3D object/background renders: `./output/test_3d/split/{scene}/`
+4. (Optional) inspect training curves with TensorBoard:
+   ```bash
+   tensorboard --logdir ./output/${dataset}/${scene}
+   ```
+
 ## Acknowledgements
 Some codes are borrowed from  [Egolifter](https://github.com/facebookresearch/egolifter), [SA3D](https://github.com/Jumpat/SegmentAnythingin3D), [Omniseg3D](https://github.com/THU-luvision/OmniSeg3D), [FlashSplat](https://github.com/florinshen/FlashSplat) and [Gaussian-Editor](https://github.com/buaacyw/GaussianEditor). We thank all the authors for their great work. 
 

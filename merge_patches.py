@@ -27,12 +27,18 @@ class MaskRepairPipeline:
         self.dataset=None
         self.setup_directories()
         self.train_idx = None
-        if 'llff' in dataset_path:
+        dataset_path_lower = dataset_path.lower()
+        if 'llff' in dataset_path_lower:
             self.dataset='llff'
             self.sam_name=self.nvos_sam
-        elif 'replica' in dataset_path:
+        elif 'replica' in dataset_path_lower:
             self.sam_name = self.replica_sam
             self.dataset='replica'
+        else:
+            raise ValueError(
+                f"Unsupported dataset path '{dataset_path}'. "
+                "Expected a path containing 'replica' or 'llff'."
+            )
         
     def setup_directories(self) -> None:
         sam_path = self.dataset_path / DEFAULT_SAM_FOLDER
