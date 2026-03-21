@@ -143,7 +143,7 @@ bash replica.sh eval
      - `cameras.json`, `input.ply`: scene metadata/init point cloud copy
      - `point_cloud/iteration_7000/point_cloud.ply`, `point_cloud/iteration_30000/point_cloud.ply`: saved Gaussian models
      - `chkpnt30000.pth`: RGB training checkpoint
-     - `events.out.tfevents*` (if TensorBoard available): training logs
+     - `events.out.tfevents.{timestamp}*` (if TensorBoard available): training logs
 
 3. **Merge patch masks**
    ```bash
@@ -152,7 +152,7 @@ bash replica.sh eval
    - Output path: `source/sam/`
    - Files/folders:
      - `split/{image_name}.npy`: repaired/merged mask used by later stages
-     - `compare/iter=0/*.png`: before/after mask comparison visualization
+     - `compare/iter=0/*.png`: before/after mask comparison visualization (`merge_patches.py` currently runs one repair iteration, so folder name is fixed to `iter=0`)
 
 4. **Delete ambiguous Gaussians**
    ```bash
