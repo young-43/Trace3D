@@ -112,6 +112,28 @@ bash replica.sh train_contra
 ```bash
 bash replica.sh eval_3d
 ```
+如果想把每个物体对应的高斯子集导出为 `.ply`（可直接用 MeshLab / CloudCompare / Open3D 等 3D viewer 打开），先在 `eval_3d` 时保存 mask，再执行导出脚本：
+```bash
+# 1) 先生成每个物体的高斯 mask（默认保存在 ${model_path}/objects/*.pt）
+python evaluation/eval_3d.py \
+  -s {SOURCE_PATH} \
+  -m {MODEL_PATH} \
+  --save_path {VIS_SAVE_PATH} \
+  --result_save_path {RESULT_SAVE_DIR} \
+  --method split \
+  --start_checkpoint {CHECKPOINT_PATH} \
+  --save_gaus_mask
+
+# 2) 导出每个物体的 gaussian 子集为 ply（默认输出到 ${model_path}/objects_ply）
+python evaluation/export_gaus_ply.py \
+  -s {SOURCE_PATH} \
+  -m {MODEL_PATH} \
+  --start_checkpoint {CHECKPOINT_PATH}
+```
+可选参数：
+- `--gaus_mask_path`：指定单个 `*_gaus_mask.pt` 文件，或包含多个 mask 的目录（默认 `${model_path}/objects`）。
+- `--save_path`：指定导出 ply 的目录（默认 `${model_path}/objects_ply`）。
+
 Novel View 2D Instance Segmentation
 ```bash
 bash replica.sh eval         
