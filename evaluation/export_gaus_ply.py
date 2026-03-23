@@ -15,6 +15,7 @@ from utils.metric_utils import get_obj_by_mask
 
 
 def collect_mask_files(mask_path: Path):
+    """Return mask files from one file path or from a directory of *_gaus_mask.pt files."""
     if mask_path.is_file():
         return [mask_path]
     if mask_path.is_dir():
@@ -47,7 +48,7 @@ if __name__ == "__main__":
 
     dataset = model.extract(args)
     checkpoint = torch.load(args.start_checkpoint, map_location="cpu")
-    model_params, _ = checkpoint
+    model_params, _iter_step = checkpoint
 
     gaussians = GaussianModel(dataset.sh_degree)
     gaussians.restore(model_params, mode="render")
@@ -60,6 +61,7 @@ if __name__ == "__main__":
     if len(mask_files) == 0:
         raise FileNotFoundError(f"No '*_gaus_mask.pt' files found under: {mask_path}")
 
+    model_device = gaussians.get_xyz.device
     gaus_num = gaussians.get_xyz.shape[0]
     exported = 0
     for mask_file in mask_files:
@@ -73,7 +75,7 @@ if __name__ == "__main__":
             print(f"[Skip] {mask_file}: mask size {gaus_mask.numel()} != gaussian size {gaus_num}")
             continue
 
-        object_gaussians = get_obj_by_mask(gaussians, gaus_mask.to(gaussians.get_xyz.device))
+        object_gaussians = get_obj_by_mask(gaussians, gaus_mask.to(model_device))
         object_name = mask_file.name.replace("_gaus_mask.pt", "")
         ply_path = save_path / f"{object_name}.ply"
         object_gaussians.save_ply(str(ply_path))
