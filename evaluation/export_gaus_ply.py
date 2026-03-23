@@ -53,13 +53,19 @@ if __name__ == "__main__":
     gaussians = GaussianModel(dataset.sh_degree)
     gaussians.restore(model_params, mode="render")
 
+    if args.gaus_mask_path is None and not dataset.model_path:
+        raise ValueError("model_path is required when --gaus_mask_path is not provided")
+
     mask_path = Path(args.gaus_mask_path or os.path.join(dataset.model_path, "objects"))
     save_path = Path(args.save_path or os.path.join(dataset.model_path, "objects_ply"))
     save_path.mkdir(parents=True, exist_ok=True)
 
     mask_files = collect_mask_files(mask_path)
     if len(mask_files) == 0:
-        raise FileNotFoundError(f"No '*_gaus_mask.pt' files found under: {mask_path}")
+        raise FileNotFoundError(
+            f"No '*_gaus_mask.pt' files found in directory: {mask_path}. "
+            "Please run eval_3d with --save_gaus_mask first, or pass --gaus_mask_path."
+        )
 
     model_device = gaussians.get_xyz.device
     gaus_num = gaussians.get_xyz.shape[0]
@@ -67,7 +73,7 @@ if __name__ == "__main__":
     for mask_file in mask_files:
         gaus_mask = torch.load(mask_file, map_location="cpu")
         if not torch.is_tensor(gaus_mask):
-            print(f"[Skip] {mask_file}: loaded object is not a tensor")
+            print(f"[Skip] {mask_file}: loaded object is not a tensor (type={type(gaus_mask)})")
             continue
 
         gaus_mask = gaus_mask.bool().reshape(-1)
