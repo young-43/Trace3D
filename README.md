@@ -134,6 +134,26 @@ python evaluation/export_gaus_ply.py \
 - `--gaus_mask_path`：指定单个 `*_gaus_mask.pt` 文件，或包含多个 mask 的目录（默认 `${model_path}/objects`）。
 - `--save_path`：指定导出 ply 的目录（默认 `${model_path}/objects_ply`）。
 
+如果要做对象级编辑（例如在 Unity 中拖动每个对象的包围盒），可以在同一批 `*_gaus_mask.pt` 上导出对象包围盒：
+```bash
+# 3) 导出每个对象的包围盒（AABB + OBB）到 JSON
+python evaluation/export_object_bboxes.py \
+  -s {SOURCE_PATH} \
+  -m {MODEL_PATH} \
+  --start_checkpoint {CHECKPOINT_PATH} \
+  --gaus_mask_path {MODEL_PATH}/objects \
+  --save_path {MODEL_PATH}/objects_bbox.json
+```
+
+导出的 `objects_bbox.json` 同时包含：
+- 原始右手系下的 `aabb` / `obb`；
+- 以及用于 Unity 的左手系 `unity.aabb` / `unity.obb`（已做 z 翻转）。
+
+Unity 侧最小接入方式：
+- 将 `unity/Trace3DObjectEdit/Trace3DBboxLoader.cs` 与 `unity/Trace3DObjectEdit/Trace3DBoxDrag.cs` 放入 Unity 工程；
+- 把 `objects_bbox.json` 放到 Unity `Assets` 下并作为 `TextAsset` 引用给 `Trace3DBboxLoader.bboxJson`；
+- 在场景中挂载 `Trace3DBboxLoader`，点击 Inspector 的 `Load Boxes`（或运行时调用）即可生成可拖动包围盒。
+
 Novel View 2D Instance Segmentation
 ```bash
 bash replica.sh eval         
