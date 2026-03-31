@@ -14,6 +14,9 @@ if ROOT_DIR not in sys.path:
 from arguments import ModelParams, get_combined_args
 from scene import GaussianModel
 
+QUATERNION_NORM_EPSILON = 1e-12
+COVARIANCE_REGULARIZATION = 1e-8
+
 
 def collect_mask_files(mask_path: Path):
     if mask_path.is_file():
@@ -58,12 +61,12 @@ def rotation_matrix_to_quaternion_xyzw(rot):
         x = (r[0, 2] + r[2, 0]) / s
         y = (r[1, 2] + r[2, 1]) / s
         z = 0.25 * s
-    q = np.array([x, y, z, w], dtype=np.float64)
-    n = np.linalg.norm(q)
-    if n < 1e-12:
+    quaternion = np.array([x, y, z, w], dtype=np.float64)
+    n = np.linalg.norm(quaternion)
+    if n < QUATERNION_NORM_EPSILON:
         return [0.0, 0.0, 0.0, 1.0]
-    q = q / n
-    return as_float_list(q)
+    quaternion = quaternion / n
+    return as_float_list(quaternion)
 
 
 def compute_aabb(points_xyz):
@@ -84,7 +87,7 @@ def compute_obb(points_xyz):
     centered = points_xyz - mean
 
     cov = np.cov(centered, rowvar=False)
-    cov = cov + np.eye(3, dtype=np.float64) * 1e-8
+    cov = cov + np.eye(3, dtype=np.float64) * COVARIANCE_REGULARIZATION
     eigvals, eigvecs = np.linalg.eigh(cov)
     order = np.argsort(eigvals)[::-1]
     rot = eigvecs[:, order]
@@ -111,7 +114,7 @@ def compute_obb(points_xyz):
 
 
 def to_unity_left_handed(aabb, obb):
-    s = np.diag([1.0, 1.0, -1.0])
+    coordinate_flip = np.diag([1.0, 1.0, -1.0])
 
     aabb_min = np.array(aabb["min"], dtype=np.float64)
     aabb_max = np.array(aabb["max"], dtype=np.float64)
@@ -124,8 +127,8 @@ def to_unity_left_handed(aabb, obb):
     rot = np.array(obb["rotation_matrix"], dtype=np.float64)
     extents = np.array(obb["extents"], dtype=np.float64)
 
-    center_lhs_obb = s @ center
-    rot_lhs = s @ rot @ s
+    center_lhs_obb = coordinate_flip @ center
+    rot_lhs = coordinate_flip @ rot @ coordinate_flip
 
     return {
         "aabb": {
