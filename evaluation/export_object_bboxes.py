@@ -1,10 +1,10 @@
 import json
+import math
 import os
 import sys
 from argparse import ArgumentParser
 from pathlib import Path
 
-import numpy as np
 import torch
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -12,7 +12,6 @@ if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
 from arguments import ModelParams, get_combined_args
-from scene import GaussianModel
 
 QUATERNION_NORM_EPSILON = 1e-12
 COVARIANCE_REGULARIZATION = 1e-8
@@ -27,42 +26,48 @@ def collect_mask_files(mask_path: Path):
 
 
 def as_float_list(arr):
-    return [float(x) for x in np.asarray(arr).reshape(-1).tolist()]
+    if torch.is_tensor(arr):
+        return [float(x) for x in arr.reshape(-1).tolist()]
+    return [float(x) for x in arr]
 
 
 def matrix3_to_list(mat):
-    return [[float(x) for x in row] for row in np.asarray(mat).reshape(3, 3).tolist()]
+    if torch.is_tensor(mat):
+        mat = mat.reshape(3, 3).tolist()
+    return [[float(x) for x in row] for row in mat]
 
 
 def rotation_matrix_to_quaternion_xyzw(rot):
-    r = np.asarray(rot, dtype=np.float64)
-    trace = np.trace(r)
+    if not torch.is_tensor(rot):
+        rot = torch.tensor(rot, dtype=torch.float64)
+    r = rot.to(dtype=torch.float64).reshape(3, 3)
+    trace = float(torch.trace(r).item())
     if trace > 0:
-        s = np.sqrt(trace + 1.0) * 2.0
+        s = math.sqrt(trace + 1.0) * 2.0
         w = 0.25 * s
-        x = (r[2, 1] - r[1, 2]) / s
-        y = (r[0, 2] - r[2, 0]) / s
-        z = (r[1, 0] - r[0, 1]) / s
-    elif r[0, 0] > r[1, 1] and r[0, 0] > r[2, 2]:
-        s = np.sqrt(1.0 + r[0, 0] - r[1, 1] - r[2, 2]) * 2.0
-        w = (r[2, 1] - r[1, 2]) / s
+        x = float((r[2, 1] - r[1, 2]).item()) / s
+        y = float((r[0, 2] - r[2, 0]).item()) / s
+        z = float((r[1, 0] - r[0, 1]).item()) / s
+    elif float(r[0, 0].item()) > float(r[1, 1].item()) and float(r[0, 0].item()) > float(r[2, 2].item()):
+        s = math.sqrt(1.0 + float(r[0, 0].item()) - float(r[1, 1].item()) - float(r[2, 2].item())) * 2.0
+        w = float((r[2, 1] - r[1, 2]).item()) / s
         x = 0.25 * s
-        y = (r[0, 1] + r[1, 0]) / s
-        z = (r[0, 2] + r[2, 0]) / s
-    elif r[1, 1] > r[2, 2]:
-        s = np.sqrt(1.0 + r[1, 1] - r[0, 0] - r[2, 2]) * 2.0
-        w = (r[0, 2] - r[2, 0]) / s
-        x = (r[0, 1] + r[1, 0]) / s
+        y = float((r[0, 1] + r[1, 0]).item()) / s
+        z = float((r[0, 2] + r[2, 0]).item()) / s
+    elif float(r[1, 1].item()) > float(r[2, 2].item()):
+        s = math.sqrt(1.0 + float(r[1, 1].item()) - float(r[0, 0].item()) - float(r[2, 2].item())) * 2.0
+        w = float((r[0, 2] - r[2, 0]).item()) / s
+        x = float((r[0, 1] + r[1, 0]).item()) / s
         y = 0.25 * s
-        z = (r[1, 2] + r[2, 1]) / s
+        z = float((r[1, 2] + r[2, 1]).item()) / s
     else:
-        s = np.sqrt(1.0 + r[2, 2] - r[0, 0] - r[1, 1]) * 2.0
-        w = (r[1, 0] - r[0, 1]) / s
-        x = (r[0, 2] + r[2, 0]) / s
-        y = (r[1, 2] + r[2, 1]) / s
+        s = math.sqrt(1.0 + float(r[2, 2].item()) - float(r[0, 0].item()) - float(r[1, 1].item())) * 2.0
+        w = float((r[1, 0] - r[0, 1]).item()) / s
+        x = float((r[0, 2] + r[2, 0]).item()) / s
+        y = float((r[1, 2] + r[2, 1]).item()) / s
         z = 0.25 * s
-    quaternion = np.array([x, y, z, w], dtype=np.float64)
-    n = np.linalg.norm(quaternion)
+    quaternion = torch.tensor([x, y, z, w], dtype=torch.float64)
+    n = float(torch.linalg.norm(quaternion).item())
     if n < QUATERNION_NORM_EPSILON:
         return [0.0, 0.0, 0.0, 1.0]
     quaternion = quaternion / n
@@ -70,8 +75,8 @@ def rotation_matrix_to_quaternion_xyzw(rot):
 
 
 def compute_aabb(points_xyz):
-    mins = points_xyz.min(axis=0)
-    maxs = points_xyz.max(axis=0)
+    mins = points_xyz.min(dim=0).values
+    maxs = points_xyz.max(dim=0).values
     center = (mins + maxs) / 2.0
     size = maxs - mins
     return {
@@ -83,21 +88,21 @@ def compute_aabb(points_xyz):
 
 
 def compute_obb(points_xyz):
-    mean = points_xyz.mean(axis=0)
+    mean = points_xyz.mean(dim=0)
     centered = points_xyz - mean
 
-    cov = np.cov(centered, rowvar=False)
-    cov = cov + np.eye(3, dtype=np.float64) * COVARIANCE_REGULARIZATION
-    eigvals, eigvecs = np.linalg.eigh(cov)
-    order = np.argsort(eigvals)[::-1]
+    cov = centered.T @ centered / max(centered.shape[0] - 1, 1)
+    cov = cov + torch.eye(3, dtype=torch.float64) * COVARIANCE_REGULARIZATION
+    eigvals, eigvecs = torch.linalg.eigh(cov)
+    order = torch.argsort(eigvals, descending=True)
     rot = eigvecs[:, order]
 
-    if np.linalg.det(rot) < 0:
+    if torch.det(rot).item() < 0:
         rot[:, 2] *= -1.0
 
     local = centered @ rot
-    local_min = local.min(axis=0)
-    local_max = local.max(axis=0)
+    local_min = local.min(dim=0).values
+    local_max = local.max(dim=0).values
     local_center = (local_min + local_max) / 2.0
     extents = (local_max - local_min) / 2.0
 
@@ -114,18 +119,18 @@ def compute_obb(points_xyz):
 
 
 def to_unity_left_handed(aabb, obb):
-    coordinate_flip = np.diag([1.0, 1.0, -1.0])
+    coordinate_flip = torch.diag(torch.tensor([1.0, 1.0, -1.0], dtype=torch.float64))
 
-    aabb_min = np.array(aabb["min"], dtype=np.float64)
-    aabb_max = np.array(aabb["max"], dtype=np.float64)
-    min_lhs = np.array([aabb_min[0], aabb_min[1], -aabb_max[2]], dtype=np.float64)
-    max_lhs = np.array([aabb_max[0], aabb_max[1], -aabb_min[2]], dtype=np.float64)
+    aabb_min = torch.tensor(aabb["min"], dtype=torch.float64)
+    aabb_max = torch.tensor(aabb["max"], dtype=torch.float64)
+    min_lhs = torch.tensor([aabb_min[0], aabb_min[1], -aabb_max[2]], dtype=torch.float64)
+    max_lhs = torch.tensor([aabb_max[0], aabb_max[1], -aabb_min[2]], dtype=torch.float64)
     center_lhs = (min_lhs + max_lhs) / 2.0
     size_lhs = max_lhs - min_lhs
 
-    center = np.array(obb["center"], dtype=np.float64)
-    rot = np.array(obb["rotation_matrix"], dtype=np.float64)
-    extents = np.array(obb["extents"], dtype=np.float64)
+    center = torch.tensor(obb["center"], dtype=torch.float64)
+    rot = torch.tensor(obb["rotation_matrix"], dtype=torch.float64)
+    extents = torch.tensor(obb["extents"], dtype=torch.float64)
 
     center_lhs_obb = coordinate_flip @ center
     rot_lhs = coordinate_flip @ rot @ coordinate_flip
@@ -147,7 +152,23 @@ def to_unity_left_handed(aabb, obb):
     }
 
 
-if __name__ == "__main__":
+def extract_xyz_from_checkpoint_model(model_params):
+    if not isinstance(model_params, (tuple, list)) or len(model_params) < 2:
+        raise ValueError(
+            "Invalid checkpoint model params format: expected tuple/list with xyz at index 1."
+        )
+    xyz = model_params[1]
+    if not torch.is_tensor(xyz):
+        raise ValueError(
+            f"Invalid xyz type in checkpoint model params: expected torch.Tensor, got {type(xyz)}."
+        )
+    xyz = xyz.detach().cpu().to(dtype=torch.float64)
+    if xyz.ndim != 2 or xyz.shape[1] != 3:
+        raise ValueError(f"Invalid xyz shape in checkpoint model params: got {tuple(xyz.shape)}.")
+    return xyz
+
+
+def main():
     parser = ArgumentParser(description="Export object-level AABB/OBB from Gaussian masks")
     model = ModelParams(parser, sentinel=True)
     parser.add_argument("--start_checkpoint", required=True, type=str)
@@ -166,11 +187,7 @@ if __name__ == "__main__":
 
     checkpoint = torch.load(args.start_checkpoint, map_location="cpu")
     model_params, _iter_step = checkpoint
-
-    gaussians = GaussianModel(dataset.sh_degree)
-    gaussians.restore(model_params, mode="render")
-
-    xyz = gaussians.get_xyz.detach().cpu().numpy()
+    xyz = extract_xyz_from_checkpoint_model(model_params)
     gaus_num = xyz.shape[0]
 
     mask_path = Path(args.gaus_mask_path or os.path.join(dataset.model_path, "objects"))
@@ -230,3 +247,7 @@ if __name__ == "__main__":
         json.dump(output, f, indent=2, ensure_ascii=False)
 
     print(f"Done. Exported {len(output['objects'])} object bbox entries to: {save_path}")
+
+
+if __name__ == "__main__":
+    main()
