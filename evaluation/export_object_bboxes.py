@@ -224,7 +224,7 @@ def main():
             print(f"[Skip] {mask_file}: mask size {gaus_mask.numel()} != gaussian size {gaus_num}")
             continue
 
-        points = xyz[gaus_mask.numpy()]
+        points = xyz[gaus_mask]
         if points.shape[0] < args.min_points:
             print(f"[Skip] {mask_file}: too few points ({points.shape[0]} < {args.min_points})")
             continue
