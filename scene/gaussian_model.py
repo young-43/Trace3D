@@ -310,7 +310,7 @@ class GaussianModel:
                 param_group['lr'] = lr
                 return lr
 
-    def construct_list_of_attributes(self):
+    def construct_list_of_attributes(self, scale_dim_override=None):
         l = ['x', 'y', 'z', 'nx', 'ny', 'nz']
         # All channels except the 3 DC
         for i in range(self._features_dc.shape[1]*self._features_dc.shape[2]):
@@ -318,7 +318,8 @@ class GaussianModel:
         for i in range(self._features_rest.shape[1]*self._features_rest.shape[2]):
             l.append('f_rest_{}'.format(i))
         l.append('opacity')
-        for i in range(self._scaling.shape[1]):
+        scale_dim = self._scaling.shape[1] if scale_dim_override is None else scale_dim_override
+        for i in range(scale_dim):
             l.append('scale_{}'.format(i))
         for i in range(self._rotation.shape[1]):
             l.append('rot_{}'.format(i))
@@ -333,9 +334,15 @@ class GaussianModel:
         f_rest = self._features_rest.detach().transpose(1, 2).flatten(start_dim=1).contiguous().cpu().numpy()
         opacities = self._opacity.detach().cpu().numpy()
         scale = self._scaling.detach().cpu().numpy()
+        if scale.shape[1] == 2:
+            # Internal representation keeps the third axis fixed at log(1)=0.
+            # Export a compatibility scale_2 column for external Gaussian splat loaders (e.g., Unity).
+            scale = np.concatenate(
+                (scale, np.zeros((scale.shape[0], 1), dtype=scale.dtype)), axis=1
+            )
         rotation = self._rotation.detach().cpu().numpy()
 
-        dtype_full = [(attribute, 'f4') for attribute in self.construct_list_of_attributes()]
+        dtype_full = [(attribute, 'f4') for attribute in self.construct_list_of_attributes(scale_dim_override=scale.shape[1])]
 
         elements = np.empty(xyz.shape[0], dtype=dtype_full)
         attributes = np.concatenate(
@@ -380,6 +387,10 @@ class GaussianModel:
         scales = np.zeros((xyz.shape[0], len(scale_names)))
         for idx, attr_name in enumerate(scale_names):
             scales[:, idx] = np.asarray(plydata.elements[0][attr_name])
+        if scales.shape[1] >= 2:
+            scales = scales[:, :2]
+        else:
+            raise ValueError(f"Invalid gaussian ply: expected at least 2 scale_* fields, got {scales.shape[1]}")
 
         rot_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("rot")]
         rot_names = sorted(rot_names, key=lambda x: int(x.split('_')[-1]))
