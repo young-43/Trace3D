@@ -390,7 +390,7 @@ class GaussianModel:
         if scales.shape[1] >= 2:
             scales = scales[:, :2]
         else:
-            raise ValueError(f"Invalid gaussian ply: expected at least 2 scale_* fields, got {scales.shape[1]}")
+            raise ValueError(f"Invalid gaussian ply: expected 2 or more scale_* fields, got {scales.shape[1]}")
 
         rot_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("rot")]
         rot_names = sorted(rot_names, key=lambda x: int(x.split('_')[-1]))
