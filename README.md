@@ -130,6 +130,18 @@ python evaluation/export_gaus_ply.py \
   -m {MODEL_PATH} \
   --start_checkpoint {CHECKPOINT_PATH}
 ```
+如果你需要导出**整个场景**（而不是对象子集）的 `.ply`，可直接从 checkpoint 导出：
+```bash
+python evaluation/export_scene_ply.py \
+  -s {SOURCE_PATH} \
+  -m {MODEL_PATH} \
+  --start_checkpoint {CHECKPOINT_PATH} \
+  --save_path {MODEL_PATH}/scene.ply \
+  --unity_compatible
+```
+说明：
+- 默认不加 `--unity_compatible` 时，保持 Trace3D 原始导出语义；
+- 加 `--unity_compatible` 时，会导出更适合 Unity Gaussian Loader 的参数（激活后的 opacity/scale、归一化 rotation、并补 `scale_2=1`）。
 可选参数：
 - `--gaus_mask_path`：指定单个 `*_gaus_mask.pt` 文件，或包含多个 mask 的目录（默认 `${model_path}/objects`）。
 - `--save_path`：指定导出 ply 的目录（默认 `${model_path}/objects_ply`）。
