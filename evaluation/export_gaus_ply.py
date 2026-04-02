@@ -44,6 +44,11 @@ if __name__ == "__main__":
         type=str,
         help="Directory to save exported PLY files",
     )
+    parser.add_argument(
+        "--unity_compatible",
+        action="store_true",
+        help="Export with activated opacity/scale/rotation and scale_2=1 for Unity loaders",
+    )
     args = get_combined_args(parser)
 
     dataset = model.extract(args)
@@ -84,7 +89,7 @@ if __name__ == "__main__":
         object_gaussians = get_obj_by_mask(gaussians, gaus_mask.to(model_device))
         object_name = mask_file.name.replace("_gaus_mask.pt", "")
         ply_path = save_path / f"{object_name}.ply"
-        object_gaussians.save_ply(str(ply_path))
+        object_gaussians.save_ply(str(ply_path), for_unity=args.unity_compatible)
         exported += 1
         print(f"[OK] Exported {ply_path}")
 

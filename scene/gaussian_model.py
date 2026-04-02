@@ -10,6 +10,7 @@
 #
 
 import torch
+import torch.nn.functional as F
 import numpy as np
 from utils.general_utils import inverse_sigmoid, get_expon_lr_func, build_rotation
 from torch import nn
@@ -325,22 +326,31 @@ class GaussianModel:
             l.append('rot_{}'.format(i))
         return l
 
-    def save_ply(self, path):
+    def save_ply(self, path, for_unity=False):
         mkdir_p(os.path.dirname(path))
 
         xyz = self._xyz.detach().cpu().numpy()
         normals = np.zeros_like(xyz)
         f_dc = self._features_dc.detach().transpose(1, 2).flatten(start_dim=1).contiguous().cpu().numpy()
         f_rest = self._features_rest.detach().transpose(1, 2).flatten(start_dim=1).contiguous().cpu().numpy()
-        opacities = self._opacity.detach().cpu().numpy()
-        scale = self._scaling.detach().cpu().numpy()
-        if scale.shape[1] == 2:
-            # Internal representation keeps the third axis fixed at log(1)=0.
-            # Export a compatibility scale_2 column for external Gaussian splat loaders (e.g., Unity).
-            scale = np.concatenate(
-                (scale, np.zeros((scale.shape[0], 1), dtype=scale.dtype)), axis=1
-            )
-        rotation = self._rotation.detach().cpu().numpy()
+        if for_unity:
+            opacities = self.get_opacity.detach().cpu().numpy()
+            scale = self.get_scaling.detach().cpu().numpy()
+            if scale.shape[1] == 2:
+                scale = np.concatenate(
+                    (scale, np.ones((scale.shape[0], 1), dtype=scale.dtype)), axis=1
+                )
+            rotation = F.normalize(self._rotation, dim=-1).detach().cpu().numpy()
+        else:
+            opacities = self._opacity.detach().cpu().numpy()
+            scale = self._scaling.detach().cpu().numpy()
+            if scale.shape[1] == 2:
+                # Internal representation keeps the third axis fixed at log(1)=0.
+                # Export a compatibility scale_2 column for external Gaussian splat loaders (e.g., Unity).
+                scale = np.concatenate(
+                    (scale, np.zeros((scale.shape[0], 1), dtype=scale.dtype)), axis=1
+                )
+            rotation = self._rotation.detach().cpu().numpy()
 
         dtype_full = [(attribute, 'f4') for attribute in self.construct_list_of_attributes(scale_dim_override=scale.shape[1])]
 
