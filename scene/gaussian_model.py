@@ -340,7 +340,30 @@ class GaussianModel:
                 scale = np.concatenate(
                     (scale, np.ones((scale.shape[0], 1), dtype=scale.dtype)), axis=1
                 )
-            rotation = F.normalize(self._rotation, dim=-1).detach().cpu().numpy()
+            rotation = F.normalize(self._rotation, dim=-1, eps=1e-12).detach().cpu().numpy()
+
+            finite_mask = (
+                np.isfinite(xyz).all(axis=1)
+                & np.isfinite(f_dc).all(axis=1)
+                & np.isfinite(f_rest).all(axis=1)
+                & np.isfinite(opacities).all(axis=1)
+                & np.isfinite(scale).all(axis=1)
+                & np.isfinite(rotation).all(axis=1)
+            )
+            if not finite_mask.all():
+                dropped = int((~finite_mask).sum())
+                print(f"[Warn] save_ply(for_unity=True): dropped {dropped} non-finite gaussians before export.")
+                xyz = xyz[finite_mask]
+                normals = normals[finite_mask]
+                f_dc = f_dc[finite_mask]
+                f_rest = f_rest[finite_mask]
+                opacities = opacities[finite_mask]
+                scale = scale[finite_mask]
+                rotation = rotation[finite_mask]
+
+            # Keep exported values in a conservative numeric range for Unity-side loaders.
+            opacities = np.clip(opacities, 1e-6, 1.0 - 1e-6)
+            scale = np.clip(scale, 1e-4, 1e2)
         else:
             opacities = self._opacity.detach().cpu().numpy()
             scale = self._scaling.detach().cpu().numpy()
@@ -351,6 +374,9 @@ class GaussianModel:
                     (scale, np.zeros((scale.shape[0], 1), dtype=scale.dtype)), axis=1
                 )
             rotation = self._rotation.detach().cpu().numpy()
+
+        if xyz.shape[0] == 0:
+            raise ValueError("No valid gaussians to export after filtering.")
 
         dtype_full = [(attribute, 'f4') for attribute in self.construct_list_of_attributes(scale_dim_override=scale.shape[1])]
 
