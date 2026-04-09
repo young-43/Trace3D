@@ -166,6 +166,13 @@ Unity 侧最小接入方式：
 - 把 `objects_bbox.json` 放到 Unity `Assets` 下并作为 `TextAsset` 引用给 `Trace3DBboxLoader.bboxJson`；
 - 在场景中挂载 `Trace3DBboxLoader`，点击 Inspector 的 `Load Boxes`（或运行时调用）即可生成可拖动包围盒。
 
+如果要直接把导出的 `.ply` 渲染成“模型风格”（体素网格，而不是点云）：
+- 将 `unity/Trace3DObjectEdit/Trace3DPlyVoxelMeshRenderer.cs` 放入 Unity 工程；
+- 在场景中创建空物体并挂载该脚本；
+- 通过 `plyAsset`（TextAsset）或 `plyFilePath`（绝对路径）指定 PLY；
+- 点击 Inspector 的 `Build Mesh From PLY`；
+- 该脚本同时支持 `ascii`、`binary_little_endian`、`binary_big_endian` 三种 PLY 格式。
+
 Novel View 2D Instance Segmentation
 ```bash
 bash replica.sh eval         
