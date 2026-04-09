@@ -169,7 +169,7 @@ public class Trace3DPlyVoxelMeshRenderer : MonoBehaviour
                 }
                 else if (t.Length >= 5 && t[1] == "list")
                 {
-                    throw new InvalidDataException("Vertex list properties are not supported.");
+                    throw new InvalidDataException("Vertex list properties in PLY vertex element are not supported.");
                 }
             }
             else if (line == "end_header")
