@@ -175,9 +175,13 @@ public class Trace3DPlyVoxelMeshRenderer : MonoBehaviour
             else if (line.StartsWith("element ", StringComparison.Ordinal))
             {
                 string[] t = SplitWS(line);
-                inVertexElement = t.Length >= 3 && t[1] == "vertex";
-                if (inVertexElement && !int.TryParse(t[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out vertexCount))
-                    throw new InvalidDataException($"Invalid vertex element line: {line}");
+                bool isVertexElement = t.Length >= 3 && t[1] == "vertex";
+                if (isVertexElement)
+                {
+                    if (!int.TryParse(t[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out vertexCount))
+                        throw new InvalidDataException($"Invalid vertex element line: {line}");
+                }
+                inVertexElement = isVertexElement;
             }
             else if (inVertexElement && line.StartsWith("property ", StringComparison.Ordinal))
             {
@@ -554,7 +558,6 @@ public class Trace3DPlyVoxelMeshRenderer : MonoBehaviour
             "Particles/Standard Unlit",
             "Sprites/Default",
             "Legacy Shaders/Particles/Alpha Blended",
-            "Standard",
         };
 
         Shader shader = null;
