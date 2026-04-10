@@ -112,6 +112,69 @@ bash replica.sh train_contra
 ```bash
 bash replica.sh eval_3d
 ```
+如果想把每个物体对应的高斯子集导出为 `.ply`（可直接用 MeshLab / CloudCompare / Open3D 等 3D viewer 打开），先在 `eval_3d` 时保存 mask，再执行导出脚本：
+```bash
+# 1) 先生成每个物体的高斯 mask（默认保存在 ${model_path}/objects/*.pt）
+python evaluation/eval_3d.py \
+  -s {SOURCE_PATH} \
+  -m {MODEL_PATH} \
+  --save_path {VIS_SAVE_PATH} \
+  --result_save_path {RESULT_SAVE_DIR} \
+  --method split \
+  --start_checkpoint {CHECKPOINT_PATH} \
+  --save_gaus_mask
+
+# 2) 导出每个物体的 gaussian 子集为 ply（默认输出到 ${model_path}/objects_ply）
+python evaluation/export_gaus_ply.py \
+  -s {SOURCE_PATH} \
+  -m {MODEL_PATH} \
+  --start_checkpoint {CHECKPOINT_PATH}
+```
+如果你需要导出**整个场景**（而不是对象子集）的 `.ply`，可直接从 checkpoint 导出：
+```bash
+python evaluation/export_scene_ply.py \
+  -s {SOURCE_PATH} \
+  -m {MODEL_PATH} \
+  --start_checkpoint {CHECKPOINT_PATH} \
+  --save_path {MODEL_PATH}/scene.ply \
+  --unity_compatible
+```
+说明：
+- 默认不加 `--unity_compatible` 时，保持 Trace3D 原始导出语义；
+- 加 `--unity_compatible` 时，会导出更适合 Unity Gaussian Loader 的参数（激活后的 opacity/scale、归一化 rotation、并补 `scale_2=1`）。
+可选参数：
+- `--gaus_mask_path`：指定单个 `*_gaus_mask.pt` 文件，或包含多个 mask 的目录（默认 `${model_path}/objects`）。
+- `--save_path`：指定导出 ply 的目录（默认 `${model_path}/objects_ply`）。
+
+如果要做对象级编辑（例如在 Unity 中拖动每个对象的包围盒），可以在同一批 `*_gaus_mask.pt` 上导出对象包围盒：
+```bash
+# 3) 导出每个对象的包围盒（AABB + OBB）到 JSON
+python evaluation/export_object_bboxes.py \
+  -s {SOURCE_PATH} \
+  -m {MODEL_PATH} \
+  --start_checkpoint {CHECKPOINT_PATH} \
+  --gaus_mask_path {MODEL_PATH}/objects \
+  --save_path {MODEL_PATH}/objects_bbox.json
+```
+
+导出的 `objects_bbox.json` 同时包含：
+- 原始右手系下的 `aabb` / `obb`；
+- 以及用于 Unity 的左手系 `unity.aabb` / `unity.obb`（已做 z 翻转）。
+
+Unity 侧最小接入方式：
+- 将 `unity/Trace3DObjectEdit/Trace3DBboxLoader.cs` 与 `unity/Trace3DObjectEdit/Trace3DBoxDrag.cs` 放入 Unity 工程；
+- 把 `objects_bbox.json` 放到 Unity `Assets` 下并作为 `TextAsset` 引用给 `Trace3DBboxLoader.bboxJson`；
+- 在场景中挂载 `Trace3DBboxLoader`，点击 Inspector 的 `Load Boxes`（或运行时调用）即可生成可拖动包围盒。
+
+如果要直接把导出的 `.ply` 渲染成“模型风格”（体素网格，而不是点云）：
+- 将 `unity/Trace3DObjectEdit/Trace3DPlyVoxelMeshRenderer.cs` 放入 Unity 工程；
+- 在场景中创建空物体并挂载该脚本；
+- 通过 `plyAsset`（TextAsset）或 `plyFilePath`（绝对路径）指定 PLY；
+- 点击 Inspector 的 `Build Mesh From PLY`；
+- 该脚本同时支持 `ascii`、`binary_little_endian`、`binary_big_endian` 三种 PLY 格式。
+- 若加载慢：增大 `pointStride`（例如 2/4/8）、设置 `maxInputPoints`（如 200000~800000）、设置 `maxVoxels`（如 100000~300000）、并将 `dilationSteps` 设为 0。
+- 若“材质效果不对”：优先在 `renderMaterial` 显式指定你工程里的材质（推荐支持 Vertex Color 的材质）； 脚本内置了多种 shader fallback，但不同渲染管线表现可能不同。
+
 Novel View 2D Instance Segmentation
 ```bash
 bash replica.sh eval         
