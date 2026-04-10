@@ -172,6 +172,8 @@ Unity 侧最小接入方式：
 - 通过 `plyAsset`（TextAsset）或 `plyFilePath`（绝对路径）指定 PLY；
 - 点击 Inspector 的 `Build Mesh From PLY`；
 - 该脚本同时支持 `ascii`、`binary_little_endian`、`binary_big_endian` 三种 PLY 格式。
+- 若加载慢：增大 `pointStride`（例如 2/4/8）、设置 `maxInputPoints`（如 200000~800000）、设置 `maxVoxels`（如 100000~300000）、并将 `dilationSteps` 设为 0。
+- 若“材质效果不对”：优先在 `renderMaterial` 显式指定你工程里的材质（推荐支持 Vertex Color 的材质）；脚本内置了多种 shader fallback，但不同渲染管线表现可能不同。
 
 Novel View 2D Instance Segmentation
 ```bash

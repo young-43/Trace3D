@@ -13,10 +13,17 @@ public class Trace3DPlyVoxelMeshRenderer : MonoBehaviour
     public TextAsset plyAsset;
     public string plyFilePath;
 
+    [Header("Rendering")]
+    public Material renderMaterial;
+    public bool recalculateNormals = false;
+
     [Header("Voxel Mesh")]
     [Min(0.0001f)] public float voxelSize = 0.02f;
     [Range(0, 2)] public int dilationSteps = 1;
     public bool flipZ = true;
+    [Range(1, 32)] public int pointStride = 1;
+    [Min(0)] public int maxInputPoints = 600000;
+    [Min(0)] public int maxVoxels = 300000;
 
     [Header("Run")]
     public bool autoBuildOnStart = true;
@@ -35,6 +42,13 @@ public class Trace3DPlyVoxelMeshRenderer : MonoBehaviour
     {
         public string type;
         public string name;
+    }
+
+    struct PropertyIndices
+    {
+        public int x, y, z;
+        public int r, g, b;
+        public int f0, f1, f2;
     }
 
     struct PointColor
@@ -77,6 +91,7 @@ public class Trace3DPlyVoxelMeshRenderer : MonoBehaviour
     [ContextMenu("Build Mesh From PLY")]
     public void BuildMeshFromPly()
     {
+        var t0 = Time.realtimeSinceStartup;
         try
         {
             byte[] bytes = LoadPlyBytes();
@@ -87,6 +102,8 @@ public class Trace3DPlyVoxelMeshRenderer : MonoBehaviour
                 return;
             }
             BuildVoxelMesh(points);
+            float dt = Time.realtimeSinceStartup - t0;
+            Debug.Log($"Trace3DPlyVoxelMeshRenderer: build finished in {dt:F2}s");
         }
         catch (Exception ex)
         {
@@ -116,14 +133,16 @@ public class Trace3DPlyVoxelMeshRenderer : MonoBehaviour
         if (vertexCount <= 0)
             throw new InvalidDataException("Invalid PLY vertex count.");
 
+        var indices = BuildPropertyIndices(properties);
+
         switch (format)
         {
             case PlyFormat.Ascii:
-                return ReadAsciiVertices(data, headerBytes, vertexCount, properties);
+                return ReadAsciiVertices(data, headerBytes, vertexCount, properties, indices);
             case PlyFormat.BinaryLittleEndian:
-                return ReadBinaryVertices(data, headerBytes, vertexCount, properties, true);
+                return ReadBinaryVertices(data, headerBytes, vertexCount, properties, indices, true);
             case PlyFormat.BinaryBigEndian:
-                return ReadBinaryVertices(data, headerBytes, vertexCount, properties, false);
+                return ReadBinaryVertices(data, headerBytes, vertexCount, properties, indices, false);
             default:
                 throw new InvalidDataException("Unsupported PLY format.");
         }
@@ -183,95 +202,158 @@ public class Trace3DPlyVoxelMeshRenderer : MonoBehaviour
         if (props.Count == 0) throw new InvalidDataException("No vertex properties found in PLY.");
     }
 
-    List<PointColor> ReadAsciiVertices(byte[] data, int headerBytes, int vertexCount, List<PlyProperty> props)
+    static PropertyIndices BuildPropertyIndices(List<PlyProperty> props)
     {
-        string body = Encoding.UTF8.GetString(data, headerBytes, data.Length - headerBytes);
-        var points = new List<PointColor>(vertexCount);
-        using (var sr = new StringReader(body))
+        return new PropertyIndices
+        {
+            x = FindProp(props, "x"),
+            y = FindProp(props, "y"),
+            z = FindProp(props, "z"),
+            r = FindProp(props, "red"),
+            g = FindProp(props, "green"),
+            b = FindProp(props, "blue"),
+            f0 = FindProp(props, "f_dc_0"),
+            f1 = FindProp(props, "f_dc_1"),
+            f2 = FindProp(props, "f_dc_2"),
+        };
+    }
+
+    bool ShouldKeepPoint(int vertexIndex, int keptCount)
+    {
+        if (pointStride > 1 && (vertexIndex % pointStride) != 0) return false;
+        if (maxInputPoints > 0 && keptCount >= maxInputPoints) return false;
+        return true;
+    }
+
+    List<PointColor> ReadAsciiVertices(byte[] data, int headerBytes, int vertexCount, List<PlyProperty> props, PropertyIndices idx)
+    {
+        int reserve = vertexCount / Mathf.Max(1, pointStride);
+        if (maxInputPoints > 0) reserve = Mathf.Min(reserve, maxInputPoints);
+        var points = new List<PointColor>(Mathf.Max(1, reserve));
+
+        using (var ms = new MemoryStream(data, headerBytes, data.Length - headerBytes, false))
+        using (var sr = new StreamReader(ms, Encoding.UTF8, true, 1024, false))
         {
             string line;
-            int readCount = 0;
-            while (readCount < vertexCount && (line = sr.ReadLine()) != null)
+            int vertexIndex = 0;
+            while (vertexIndex < vertexCount && (line = sr.ReadLine()) != null)
             {
                 line = line.Trim();
-                if (line.Length == 0) continue;
+                if (line.Length == 0) continue; // don't consume vertex index for empty lines
+
+                if (!ShouldKeepPoint(vertexIndex, points.Count))
+                {
+                    vertexIndex++;
+                    continue;
+                }
+
                 string[] t = SplitWS(line);
-                if (t.Length < props.Count) continue;
-                PointColor p;
-                if (TryExtractPoint(t, props, out p)) points.Add(p);
-                readCount++;
+                if (t.Length >= props.Count)
+                {
+                    PointColor p;
+                    if (TryExtractPoint(t, idx, out p)) points.Add(p);
+                }
+                vertexIndex++;
             }
         }
         return points;
     }
 
-    List<PointColor> ReadBinaryVertices(byte[] data, int headerBytes, int vertexCount, List<PlyProperty> props, bool littleEndian)
+    List<PointColor> ReadBinaryVertices(byte[] data, int headerBytes, int vertexCount, List<PlyProperty> props, PropertyIndices idx, bool littleEndian)
     {
-        var points = new List<PointColor>(vertexCount);
+        int reserve = vertexCount / Mathf.Max(1, pointStride);
+        if (maxInputPoints > 0) reserve = Mathf.Min(reserve, maxInputPoints);
+        var points = new List<PointColor>(Mathf.Max(1, reserve));
         using (var ms = new MemoryStream(data, headerBytes, data.Length - headerBytes, false))
         using (var br = new BinaryReader(ms))
         {
+            bool hasRgbProps = idx.r >= 0 && idx.g >= 0 && idx.b >= 0;
+            bool hasFdcProps = idx.f0 >= 0 && idx.f1 >= 0 && idx.f2 >= 0;
             for (int i = 0; i < vertexCount; i++)
             {
-                var values = new string[props.Count];
+                double x = 0, y = 0, z = 0, r = 1, g = 1, b = 1, f0 = 0, f1 = 0, f2 = 0;
+
                 for (int p = 0; p < props.Count; p++)
                 {
                     double v = ReadScalarAsDouble(br, props[p].type, littleEndian);
-                    values[p] = v.ToString("R", CultureInfo.InvariantCulture);
+                    if (p == idx.x) x = v;
+                    else if (p == idx.y) y = v;
+                    else if (p == idx.z) z = v;
+                    else if (p == idx.r) r = v;
+                    else if (p == idx.g) g = v;
+                    else if (p == idx.b) b = v;
+                    else if (p == idx.f0) f0 = v;
+                    else if (p == idx.f1) f1 = v;
+                    else if (p == idx.f2) f2 = v;
                 }
 
+                if (!ShouldKeepPoint(i, points.Count))
+                    continue;
+
                 PointColor point;
-                if (TryExtractPoint(values, props, out point))
+                if (TryExtractPoint(x, y, z, hasRgbProps, r, g, b, hasFdcProps, f0, f1, f2, out point))
                     points.Add(point);
             }
         }
         return points;
     }
 
-    bool TryExtractPoint(string[] values, List<PlyProperty> props, out PointColor point)
+    bool TryExtractPoint(string[] values, PropertyIndices idx, out PointColor point)
     {
-        point = default;
-        int ix = FindProp(props, "x"), iy = FindProp(props, "y"), iz = FindProp(props, "z");
-        if (ix < 0 || iy < 0 || iz < 0) return false;
+        point = default(PointColor);
+        if (idx.x < 0 || idx.y < 0 || idx.z < 0) return false;
 
-        if (!TryParseDouble(values[ix], out double x) || !TryParseDouble(values[iy], out double y) || !TryParseDouble(values[iz], out double z))
+        if (!TryParseDouble(values[idx.x], out double x) || !TryParseDouble(values[idx.y], out double y) || !TryParseDouble(values[idx.z], out double z))
             return false;
 
+        bool hasRGB = false;
+        double r = 1, g = 1, b = 1;
+        if (idx.r >= 0 && idx.g >= 0 && idx.b >= 0 &&
+            TryParseDouble(values[idx.r], out r) &&
+            TryParseDouble(values[idx.g], out g) &&
+            TryParseDouble(values[idx.b], out b))
+        {
+            hasRGB = true;
+        }
+
+        bool hasFdc = false;
+        double f0 = 0, f1 = 0, f2 = 0;
+        if (idx.f0 >= 0 && idx.f1 >= 0 && idx.f2 >= 0 &&
+            TryParseDouble(values[idx.f0], out f0) &&
+            TryParseDouble(values[idx.f1], out f1) &&
+            TryParseDouble(values[idx.f2], out f2))
+        {
+            hasFdc = true;
+        }
+
+        return TryExtractPoint(x, y, z, hasRGB, r, g, b, hasFdc, f0, f1, f2, out point);
+    }
+
+    bool TryExtractPoint(double x, double y, double z, bool hasRGB, double r, double g, double b, bool hasFdc, double f0, double f1, double f2, out PointColor point)
+    {
+        point = default(PointColor);
         if (!IsFinite(x) || !IsFinite(y) || !IsFinite(z)) return false;
         if (flipZ) z = -z;
 
         Color c = Color.white;
-        int ir = FindProp(props, "red"), ig = FindProp(props, "green"), ib = FindProp(props, "blue");
-        if (ir >= 0 && ig >= 0 && ib >= 0 &&
-            TryParseDouble(values[ir], out double r) &&
-            TryParseDouble(values[ig], out double g) &&
-            TryParseDouble(values[ib], out double b))
+        if (hasRGB)
         {
-            if (r > 1.0 || g > 1.0 || b > 1.0) c = new Color((float)(r / 255.0), (float)(g / 255.0), (float)(b / 255.0), 1f);
-            else c = new Color((float)r, (float)g, (float)b, 1f);
+            if (r > 1.0 || g > 1.0 || b > 1.0)
+                c = new Color((float)(r / 255.0), (float)(g / 255.0), (float)(b / 255.0), 1f);
+            else
+                c = new Color((float)r, (float)g, (float)b, 1f);
         }
-        else
+        else if (hasFdc)
         {
-            int if0 = FindProp(props, "f_dc_0"), if1 = FindProp(props, "f_dc_1"), if2 = FindProp(props, "f_dc_2");
-            if (if0 >= 0 && if1 >= 0 && if2 >= 0 &&
-                TryParseDouble(values[if0], out double f0) &&
-                TryParseDouble(values[if1], out double f1) &&
-                TryParseDouble(values[if2], out double f2))
-            {
-                c = new Color(
-                    Mathf.Clamp01((float)(0.5 + SH_C0 * f0)),
-                    Mathf.Clamp01((float)(0.5 + SH_C0 * f1)),
-                    Mathf.Clamp01((float)(0.5 + SH_C0 * f2)),
-                    1f
-                );
-            }
+            c = new Color(
+                Mathf.Clamp01((float)(0.5 + SH_C0 * f0)),
+                Mathf.Clamp01((float)(0.5 + SH_C0 * f1)),
+                Mathf.Clamp01((float)(0.5 + SH_C0 * f2)),
+                1f
+            );
         }
 
-        point = new PointColor
-        {
-            pos = new Vector3((float)x, (float)y, (float)z),
-            color = c
-        };
+        point = new PointColor { pos = new Vector3((float)x, (float)y, (float)z), color = c };
         return true;
     }
 
@@ -384,6 +466,9 @@ public class Trace3DPlyVoxelMeshRenderer : MonoBehaviour
                 Mathf.RoundToInt(p.pos.y * inv),
                 Mathf.RoundToInt(p.pos.z * inv));
 
+            bool existed = occ.Contains(k);
+            if (!existed && maxVoxels > 0 && occ.Count >= maxVoxels)
+                continue;
             occ.Add(k);
             VoxelColorAcc acc;
             if (!colorAcc.TryGetValue(k, out acc)) acc = new VoxelColorAcc();
@@ -433,17 +518,14 @@ public class Trace3DPlyVoxelMeshRenderer : MonoBehaviour
         mesh.SetVertices(verts);
         mesh.SetTriangles(tris, 0);
         mesh.SetColors(cols);
-        mesh.RecalculateNormals();
+        if (recalculateNormals)
+            mesh.RecalculateNormals();
         mesh.RecalculateBounds();
 
         var mf = GetComponent<MeshFilter>();
         mf.sharedMesh = mesh;
         var mr = GetComponent<MeshRenderer>();
-        if (mr.sharedMaterial == null)
-        {
-            var mat = new Material(Shader.Find("Standard")) { enableInstancing = true };
-            mr.sharedMaterial = mat;
-        }
+        ApplyMaterial(mr);
 
         if (buildCollider)
         {
@@ -454,6 +536,38 @@ public class Trace3DPlyVoxelMeshRenderer : MonoBehaviour
         }
 
         Debug.Log($"Trace3DPlyVoxelMeshRenderer: points={points.Count}, voxels={occ.Count}, triangles={tris.Count / 3}");
+    }
+
+    void ApplyMaterial(MeshRenderer mr)
+    {
+        if (renderMaterial != null)
+        {
+            mr.sharedMaterial = renderMaterial;
+            return;
+        }
+
+        if (mr.sharedMaterial != null) return;
+
+        string[] candidates =
+        {
+            "Universal Render Pipeline/Particles/Unlit",
+            "Particles/Standard Unlit",
+            "Sprites/Default",
+            "Legacy Shaders/Particles/Alpha Blended",
+            "Standard",
+        };
+
+        Shader shader = null;
+        for (int i = 0; i < candidates.Length; i++)
+        {
+            shader = Shader.Find(candidates[i]);
+            if (shader != null) break;
+        }
+        if (shader == null) shader = Shader.Find("Standard");
+
+        var mat = new Material(shader) { enableInstancing = true };
+        mat.color = Color.white;
+        mr.sharedMaterial = mat;
     }
 
     static Color EstimateNeighborColor(Vector3Int v, HashSet<Vector3Int> occ, Dictionary<Vector3Int, VoxelColorAcc> colorAcc)
