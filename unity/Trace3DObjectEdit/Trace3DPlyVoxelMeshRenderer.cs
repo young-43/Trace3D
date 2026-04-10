@@ -469,7 +469,7 @@ public class Trace3DPlyVoxelMeshRenderer : MonoBehaviour
             bool existed = occ.Contains(k);
             if (!existed && maxVoxels > 0 && occ.Count >= maxVoxels)
                 continue;
-            occ.Add(k);
+            if (!existed) occ.Add(k);
             VoxelColorAcc acc;
             if (!colorAcc.TryGetValue(k, out acc)) acc = new VoxelColorAcc();
             acc.Add(p.color);
